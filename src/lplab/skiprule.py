@@ -101,8 +101,14 @@ def decode(
     skip: BoolArray | None = None,
     window: int = 40,
     depth: int = 4,
+    skip_penalty: float = 0.0,
 ) -> tuple[IndexArray, int]:
-    """LM-guided decode. Returns (plaintext, number of key skips chosen)."""
+    """LM-guided decode. Returns (plaintext, number of key skips chosen).
+
+    ``skip_penalty`` (mean log10 units) can be charged per chosen skip, as for interrupters.
+    It defaults to 0: measured, it barely reduces spurious skips on wrong keys (9 -> 8 on p0-2)
+    but costs exact recovery on short periodic keys, where a misaligned key still partly fits.
+    """
     quad = ngram.load().quad
     sk = np.zeros(ct.size, dtype=np.bool_) if skip is None else skip
     k = np.ascontiguousarray(key, dtype=np.int64)
@@ -139,7 +145,7 @@ def decode(
         for choice in (NO_SKIP, SKIP):
             decisions[i] = choice
             scores[choice] = lookahead(lo, hi, i + 1, depth)
-        decisions[i] = SKIP if scores[SKIP] > scores[NO_SKIP] else NO_SKIP
+        decisions[i] = SKIP if scores[SKIP] - skip_penalty > scores[NO_SKIP] else NO_SKIP
         pt, branch = run()
         pos = i + 1
     final = pt.copy()

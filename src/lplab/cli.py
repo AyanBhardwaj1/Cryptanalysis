@@ -125,6 +125,14 @@ def _cmd_screen(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_report(args: argparse.Namespace) -> int:
+    from . import report
+
+    out = report.write(Path(args.out), Path(args.db), trials=args.trials)
+    print(f"wrote {out}")
+    return 0
+
+
 def _cmd_build_kernel(args: argparse.Namespace) -> int:
     path = kernels.build(force=True)
     print(f"built {path} (backend: {kernels.backend()})")
@@ -174,6 +182,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--trials", type=int, default=30)
     p.add_argument("--length", type=int, default=1500)
     p.set_defaults(fn=_cmd_screen)
+
+    p = sub.add_parser("report", help="HTML report: anomaly charts, screen, best candidates")
+    p.add_argument("--out", default="runs/report.html")
+    p.add_argument("--db", default="runs/lab.sqlite")
+    p.add_argument("--trials", type=int, default=20)
+    p.set_defaults(fn=_cmd_report)
 
     p = sub.add_parser("build-kernel", help="(re)compile the C kernel")
     p.set_defaults(fn=_cmd_build_kernel)

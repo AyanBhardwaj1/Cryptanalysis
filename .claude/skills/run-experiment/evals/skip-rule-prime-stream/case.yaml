@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: skip-rule-prime-stream
+expected_outcome: |
+  Runs a skip_rule hypothesis with key_source=sequence, sequence=totient_primes on page
+  p8-14 through lplab, runs a positive control (a solved page encrypted with the same
+  mechanism is recovered), reports the best quad/word scores against the English/random
+  reference values, gives an honest verdict, and logs the result in docs/progress.md.

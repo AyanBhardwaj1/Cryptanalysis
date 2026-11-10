@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: adds-progressive-key
+expected_outcome: |
+  A new progressive-key family exists in lplab: a bounded pydantic schema in the Hypothesis
+  union, a decoder, a reference encryptor with a positive-control test that recovers a solved
+  page, a simulate.MECHANISMS entry, a curriculum entry, and the full test suite, ruff, mypy
+  and `lplab verify` all pass.
