@@ -127,7 +127,7 @@ def curriculum(pages: tuple[str, ...] = corpus.UNSOLVED) -> Iterator[H.Hypothesi
                 for kind in kinds:
                     yield H.RunningKeyH(
                         page=page, source=src, source_kind=kind, sign=sign,
-                        interrupt_mode="none",
+                        interrupt_mode="none", offset_max=4000,
                         rationale="curriculum: running key from another LP section",
                     )  # fmt: skip
 

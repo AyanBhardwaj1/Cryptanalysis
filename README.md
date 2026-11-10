@@ -27,7 +27,7 @@ ANTHROPIC_API_KEY=... .venv/bin/lplab orchestrate --planner claude --rounds 20 -
 .venv/bin/lplab crib --page 0_welcome --text WELCOME   # keystream implied by a guess
 ```
 
-Tests: `.venv/bin/pytest -q` (155 tests). Lint and types: `ruff check src tests && mypy src`
+Tests: `.venv/bin/pytest -q` (166 tests). Lint and types: `ruff check src tests && mypy src`
 (strict).
 
 ## How it works

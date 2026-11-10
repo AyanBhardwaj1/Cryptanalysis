@@ -68,6 +68,9 @@ class Orchestrator:
     def run(self, cfg: RunConfig) -> list[RoundReport]:
         reports: list[RoundReport] = []
         feedback: list[str] = []
+        run_start_id = self.store.max_candidate_id()  # only this run's hits can stop it
+        if dropped := self.store.drop_stale_pending():
+            log.info("re-queued %d hypotheses left pending by an interrupted run", dropped)
         for rnd in range(1, cfg.rounds + 1):
             if self.store.total_cost() >= cfg.budget_usd:
                 log.info("budget %.2f USD reached; stopping", cfg.budget_usd)
@@ -75,9 +78,13 @@ class Orchestrator:
             plan, errors = self._plan(cfg, feedback)
             new = [h for h in plan.hypotheses if self.store.add_hypothesis(h, self.planner.name)]
             dupes = len(plan.hypotheses) - len(new)
+            if not new and self.planner is not self.fallback:
+                # all duplicates: don't pay for an empty round, take the curriculum's next batch
+                fb = self.fallback.plan(self.store, cfg.batch, feedback)
+                new = [h for h in fb.hypotheses if self.store.add_hypothesis(h, self.fallback.name)]
             feedback = errors + ([f"{dupes} proposed hypotheses were duplicates"] if dupes else [])
-            if not new and not plan.hypotheses:
-                log.info("nothing left to try; stopping")
+            if not new:
+                log.info("nothing new to try; stopping")
                 break
             t0 = time.time()
             outcomes = runner.run(new, self.store, workers=cfg.workers, top_k=cfg.top_k)
@@ -96,7 +103,7 @@ class Orchestrator:
                 rnd, len(new), time.time() - t0, report.cost_usd,
                 report.best[0] if report.best else "-",
             )  # fmt: skip
-            if cfg.stop_on_breakthrough and self._breakthrough():
+            if cfg.stop_on_breakthrough and self._breakthrough(run_start_id):
                 log.warning("possible breakthrough written to %s", self.out_dir / "BREAKTHROUGH.md")
                 break
         return reports
@@ -112,10 +119,11 @@ class Orchestrator:
             feedback.append(f"judge failed: {e}")
             return 0
 
-    def _breakthrough(self) -> bool:
+    def _breakthrough(self, since_id: int = 0) -> bool:
+        """Write BREAKTHROUGH.md for judged hits among candidates newer than ``since_id``."""
         hits = [
             c
-            for c in self.store.top_candidates(50)
+            for c in self.store.top_candidates(50, since_id=since_id)
             if c.judge_score is not None and c.judge_score >= BREAKTHROUGH_JUDGE
         ]
         if not hits:

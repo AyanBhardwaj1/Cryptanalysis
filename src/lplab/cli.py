@@ -74,7 +74,7 @@ def _cmd_orchestrate(args: argparse.Namespace) -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     store = Store(Path(args.db))
-    llm = LLM(store)
+    llm = LLM(store, budget_usd=args.budget)
     use_claude = args.planner == "claude"
     orch = Orchestrator(
         store=store,
@@ -84,7 +84,11 @@ def _cmd_orchestrate(args: argparse.Namespace) -> int:
         out_dir=Path(args.db).parent,
     )
     cfg = RunConfig(
-        rounds=args.rounds, batch=args.batch, budget_usd=args.budget, workers=args.workers
+        rounds=args.rounds,
+        batch=args.batch,
+        budget_usd=args.budget,
+        workers=args.workers,
+        stop_on_breakthrough=not args.keep_going,
     )
     reports = orch.run(cfg)
     for r in reports:
@@ -168,6 +172,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--budget", type=float, default=5.0, help="max LLM spend in USD")
     p.add_argument("--workers", type=int, default=None, help="search processes")
     p.add_argument("--judge", action="store_true", help="Haiku judge with heuristic planner")
+    p.add_argument(
+        "--keep-going", action="store_true", help="don't stop when the judge flags a candidate"
+    )
     p.add_argument("--db", default="runs/lab.sqlite")
     p.set_defaults(fn=_cmd_orchestrate)
 

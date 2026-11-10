@@ -40,8 +40,16 @@ class MessagesClient(Protocol):
     def beta(self) -> Any: ...
 
 
+def _rates(model: str) -> tuple[float, float, float]:
+    """Price row by model id, tolerating suffixes on the served id; unknown -> Opus (safe high)."""
+    for known, rates in PRICES.items():
+        if model == known or model.startswith(known):
+            return rates
+    return PRICES["claude-opus-5-5"]
+
+
 def price(model: str, usage: Any) -> float:
-    pin, pout, pcache = PRICES.get(model, PRICES["claude-opus-5-5"])
+    pin, pout, pcache = _rates(model)
     inp = getattr(usage, "input_tokens", 0) or 0
     out = getattr(usage, "output_tokens", 0) or 0
     cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
@@ -53,6 +61,7 @@ def price(model: str, usage: Any) -> float:
 class LLM:
     store: Store
     client: MessagesClient | None = None
+    budget_usd: float | None = None  # hard cap on recorded spend, checked before every call
     calls: int = field(default=0, init=False)
 
     def _client(self) -> MessagesClient:
@@ -72,6 +81,8 @@ class LLM:
         max_tokens: int = 16000,
     ) -> dict[str, Any]:
         """One structured-output call. Returns the parsed JSON object or raises LLMError."""
+        if self.budget_usd is not None and self.store.total_cost() >= self.budget_usd:
+            raise LLMError(f"LLM budget of ${self.budget_usd:.2f} exhausted; not calling {role}")
         kwargs: dict[str, Any] = {
             "model": model,
             "max_tokens": max_tokens,

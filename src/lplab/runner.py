@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 
 from .hypotheses import Candidate, Hypothesis, execute, parse
@@ -47,6 +48,10 @@ def run(
             h = by_fp[futures[fut]]
             try:
                 _payload, cands = fut.result()
+            except BrokenProcessPool as e:
+                # infrastructure failure (OOM kill, Ctrl-C): leave the row pending so it re-runs
+                outcomes.append(Outcome(h, (), f"worker pool broken, will retry: {e}"))
+                continue
             except Exception as e:
                 store.fail(h, f"{type(e).__name__}: {e}")
                 outcomes.append(Outcome(h, (), f"{type(e).__name__}: {e}"))

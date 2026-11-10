@@ -30,6 +30,9 @@ PageName = corpus.PageName
 KeyWord = Annotated[str, Field(min_length=1, max_length=80, pattern=r"^[A-Za-z ]+$")]
 
 
+MAX_WORK = 120_000  # ~1-3 CPU-minutes for the cheap families
+
+
 class _Base(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -46,6 +49,26 @@ class _Base(BaseModel):
         body = self.model_dump(exclude={"rationale"})
         return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()[:20]
 
+    # --- compute budget ---
+    def _variants(self) -> int:
+        """Key/offset variants tried per affine map; families override."""
+        return 1
+
+    def work(self) -> int:
+        """Rough cost in decryptions; bounded so one proposal can't monopolise the machine."""
+        n_aff = {"identity": 1, "atbash": 1, "shifts": 2 * N, "all": (N - 1) * N}[self.affine_mode]
+        n_skip = 1 if self.interrupter is None or self.interrupt_mode == "none" else 2
+        return n_aff * n_skip * self._variants()
+
+    @model_validator(mode="after")
+    def _bounded_work(self) -> Any:
+        if self.work() > MAX_WORK:
+            raise ValueError(
+                f"hypothesis too expensive ({self.work():,} decryptions > {MAX_WORK:,}); "
+                "narrow affine_mode, keys or offsets"
+            )
+        return self
+
 
 class AffineH(_Base):
     family: Literal["affine"] = "affine"
@@ -58,6 +81,9 @@ class VigenereKeyH(_Base):
     family: Literal["vigenere_key"] = "vigenere_key"
     keys: list[KeyWord] = Field(min_length=1, max_length=200)
 
+    def _variants(self) -> int:
+        return len(self.keys)
+
 
 class VigenereClimbH(_Base):
     family: Literal["vigenere_climb"] = "vigenere_climb"
@@ -65,6 +91,10 @@ class VigenereClimbH(_Base):
     period_max: int = Field(30, ge=1, le=120)
     restarts: int = Field(8, ge=1, le=64)
     affine_mode: Literal["identity", "atbash"] = "identity"
+
+    def _variants(self) -> int:
+        # one C hill-climb restart ~ a few hundred decryptions
+        return max(0, self.period_max - self.period_min + 1) * self.restarts * 50
 
     @field_validator("period_max")
     @classmethod
@@ -79,17 +109,27 @@ class SequenceH(_Base):
     name: C.SequenceName
     offset_max: int = Field(0, ge=0, le=500)
 
+    def _variants(self) -> int:
+        return self.offset_max + 1
+
 
 class AutokeyH(_Base):
     family: Literal["autokey"] = "autokey"
     primers: list[KeyWord] = Field(min_length=1, max_length=100)
     feedback: Literal["plain", "cipher"] = "plain"
 
+    def _variants(self) -> int:
+        return len(self.primers)
+
 
 class RunningKeyH(_Base):
     family: Literal["running_key"] = "running_key"
     source: PageName
     source_kind: Literal["plaintext", "ciphertext"] = "plaintext"
+    offset_max: int = Field(500, ge=0, le=4000)
+
+    def _variants(self) -> int:
+        return self.offset_max + 1
 
 
 class SkipRuleH(_Base):
@@ -104,6 +144,11 @@ class SkipRuleH(_Base):
     offset_max: int = Field(0, ge=0, le=400)
     affine_mode: Literal["identity", "atbash", "shifts"] = "identity"
     interrupt_mode: Literal["none", "all"] = "none"
+
+    def _variants(self) -> int:
+        n = {"keyword": len(self.keys), "sequence": self.offset_max + 1}
+        # an LM-guided skip-rule decode costs ~20 plain decryptions
+        return 20 * n.get(self.key_source, self.offset_max + 1)
 
     @model_validator(mode="after")
     def _needs_key_material(self) -> SkipRuleH:
@@ -331,7 +376,7 @@ def _decryptors(h: Hypothesis, ct: IndexArray, aff: C.Affine) -> list[tuple[str,
             src = np.resize(src, ct.size + src.size)  # wrap short sources around
         return [
             (f"running={h.source}/{h.source_kind}@{off}", _run(ct, src, off, s, aff))
-            for off in range(0, src.size - ct.size + 1)
+            for off in range(0, min(src.size - ct.size, h.offset_max) + 1)
         ]
     raise TypeError(f"unsupported hypothesis {type(h).__name__}")
 

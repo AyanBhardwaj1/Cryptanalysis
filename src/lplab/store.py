@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import time
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -62,6 +63,15 @@ CREATE TABLE IF NOT EXISTS llm_calls (
 """
 
 
+def _abridge(params: dict[str, Any], keep: int = 5) -> dict[str, Any]:
+    """Shorten long key lists so the planner's notebook stays small (prompt size = cost)."""
+    out = dict(params)
+    for k, v in params.items():
+        if isinstance(v, list) and len(v) > keep:
+            out[k] = [*v[:keep], f"... +{len(v) - keep} more"]
+    return out
+
+
 @dataclass(frozen=True)
 class CandidateRow:
     id: int
@@ -79,7 +89,10 @@ class Store:
     def __init__(self, path: Path = DEFAULT_DB) -> None:
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(path, timeout=30)
+        # Haiku workers record their spend from worker threads, so the connection is shared
+        # across threads and every access is serialised by one lock.
+        self._conn = sqlite3.connect(path, timeout=30, check_same_thread=False)
+        self._lock = threading.RLock()
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
 
@@ -88,8 +101,12 @@ class Store:
 
     @contextmanager
     def _tx(self) -> Iterator[sqlite3.Connection]:
-        with self._conn:
+        with self._lock, self._conn:
             yield self._conn
+
+    def _query(self, sql: str, args: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
+        with self._lock:
+            return self._conn.execute(sql, args).fetchall()
 
     # --- hypotheses ---
     def add_hypothesis(self, h: Hypothesis, source: str) -> bool:
@@ -105,8 +122,18 @@ class Store:
             return cur.rowcount == 1
 
     def has(self, fp: str) -> bool:
-        row = self._conn.execute("SELECT 1 FROM hypotheses WHERE fp = ?", (fp,)).fetchone()
-        return row is not None
+        return bool(self._query("SELECT 1 FROM hypotheses WHERE fp = ?", (fp,)))
+
+    def drop_stale_pending(self) -> int:
+        """Forget hypotheses an interrupted run inserted but never finished, so they re-run.
+
+        Call at the start of a run, when nothing of this run is pending yet.
+        """
+        with self._tx() as c:
+            return c.execute("DELETE FROM hypotheses WHERE status = 'pending'").rowcount
+
+    def max_candidate_id(self) -> int:
+        return int(self._query("SELECT COALESCE(MAX(id), 0) FROM candidates")[0][0])
 
     def finish(self, h: Hypothesis, candidates: Sequence[Candidate]) -> None:
         best = max((c.score.combined for c in candidates), default=None)
@@ -133,12 +160,12 @@ class Store:
             )
 
     def counts(self) -> dict[str, int]:
-        rows = self._conn.execute("SELECT status, COUNT(*) FROM hypotheses GROUP BY status")
+        rows = self._query("SELECT status, COUNT(*) FROM hypotheses GROUP BY status")
         return {s: n for s, n in rows}
 
     def family_summary(self) -> list[dict[str, Any]]:
         """Per (page, family): how many hypotheses ran and the best combined score."""
-        rows = self._conn.execute(
+        rows = self._query(
             "SELECT page, family, COUNT(*), MAX(best_combined) FROM hypotheses"
             " WHERE status='done' GROUP BY page, family ORDER BY page, family"
         )
@@ -147,34 +174,36 @@ class Store:
         ]
 
     def recent_params(self, limit: int = 40) -> list[dict[str, Any]]:
-        rows = self._conn.execute(
+        rows = self._query(
             "SELECT params, best_combined FROM hypotheses WHERE status='done'"
             " ORDER BY finished_at DESC LIMIT ?",
             (limit,),
         )
-        return [{**json.loads(p), "best": round(b or 0.0, 4)} for p, b in rows]
+        return [{**_abridge(json.loads(p)), "best": round(b or 0.0, 4)} for p, b in rows]
 
     # --- candidates ---
-    def top_candidates(self, n: int = 10, page: str | None = None) -> list[CandidateRow]:
+    def top_candidates(
+        self, n: int = 10, page: str | None = None, since_id: int = 0
+    ) -> list[CandidateRow]:
+        """Best candidates; ``since_id`` restricts to candidates newer than that id."""
         sql = (
             "SELECT id, page, family, detail, quad, words, combined, preview, judge_score"
-            " FROM candidates"
+            " FROM candidates WHERE id > ?"
         )
-        args: tuple[Any, ...] = ()
+        args: tuple[Any, ...] = (since_id,)
         if page:
-            sql += " WHERE page = ?"
-            args = (page,)
+            sql += " AND page = ?"
+            args = (*args, page)
         sql += " ORDER BY combined DESC LIMIT ?"
-        rows = self._conn.execute(sql, (*args, n)).fetchall()
-        return [CandidateRow(*r) for r in rows]
+        return [CandidateRow(*r) for r in self._query(sql, (*args, n))]
 
     def unjudged_promising(self, min_combined: float, n: int = 10) -> list[CandidateRow]:
-        rows = self._conn.execute(
+        rows = self._query(
             "SELECT id, page, family, detail, quad, words, combined, preview, judge_score"
             " FROM candidates WHERE judge_score IS NULL AND combined >= ?"
             " ORDER BY combined DESC LIMIT ?",
             (min_combined, n),
-        ).fetchall()
+        )
         return [CandidateRow(*r) for r in rows]
 
     def set_judgement(self, cand_id: int, score: float, note: str) -> None:
@@ -196,5 +225,4 @@ class Store:
             )
 
     def total_cost(self) -> float:
-        row = self._conn.execute("SELECT COALESCE(SUM(cost_usd), 0) FROM llm_calls").fetchone()
-        return float(row[0])
+        return float(self._query("SELECT COALESCE(SUM(cost_usd), 0) FROM llm_calls")[0][0])

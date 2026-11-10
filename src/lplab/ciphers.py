@@ -218,7 +218,13 @@ def sequence_stream(
 
 @njit(cache=True)  # type: ignore[misc,unused-ignore]
 def _autokey_kernel(
-    ct: IndexArray, primer: IndexArray, sign: int, feedback_plain: bool, skip: BoolArray
+    ct: IndexArray,
+    primer: IndexArray,
+    sign: int,
+    feedback_plain: bool,
+    skip: BoolArray,
+    a: int,
+    b: int,
 ) -> IndexArray:  # pragma: no cover - compiled; covered via autokey()
     n = ct.size
     m = primer.size
@@ -232,7 +238,8 @@ def _autokey_kernel(
             out[i] = ct[i]
             continue
         k = hist[j]
-        p = (int(ct[i]) - sign * k) % 29
+        x = (int(ct[i]) - sign * k) % 29
+        p = (a * x + b) % 29  # the true plaintext is what feeds back, after the affine step
         out[i] = p
         hist[j + m] = p if feedback_plain else ct[i]
         j += 1
@@ -255,9 +262,9 @@ def autokey(
     if k.size == 0:
         raise ValueError("empty primer")
     s = np.zeros(ct.size, dtype=np.bool_) if skip is None else skip
-    x = _autokey_kernel(ct, k.astype(np.uint8), sign, feedback == "plain", s)
-    p = affine.apply(x)
-    p[s] = ct[s]
+    p: IndexArray = _autokey_kernel(
+        ct, k.astype(np.uint8), sign, feedback == "plain", s, affine.a % N, affine.b % N
+    )
     return p
 
 

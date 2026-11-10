@@ -12,6 +12,12 @@
   LM-guided decoder (exact recovery on planted keys at q=1.0 and 0.81), ciphertext transforms,
   interrupter skip penalty, line-wrap-aware word bounds, one-rune A/I rule, HTML report.
 - Project skills: `run-experiment`, `add-cipher-family` (each with an eval case).
+- Independent review (0 critical / 3 high / 4 medium / 1 low) all fixed with regression
+  tests: thread-safe store, per-run breakthrough, compute caps on every family, LLM budget
+  checked per call, stale pending rows re-run, duplicate plans fall back, autokey+affine.
+- Ruled out: every number-sequence keystream (primes, totient primes, naturals, totient
+  naturals, Fibonacci, squares, triangular; both signs; offsets 0-10; 58 affine maps) under
+  the skip-if-same rule, on all 9 unsolved sections. Best combined 0.087 (noise < 0.45).
 
 ## Next
 - Run `lplab orchestrate --planner claude` with an API key and a budget; nothing has been run
@@ -27,5 +33,5 @@
 ## Log
 - [2026-11-10] Omega setup added (CLAUDE.md, docs, builder/reviewer agents, reflect skill).
 - [2026-11-10] Built lplab core + Claude orchestrator; deep research; skip-rule family,
-  mechanism screen, scoring fixes, report, project skills. Heuristic smoke runs only: best
-  combined ~0.07 (noise level, as expected).
+  mechanism screen, scoring fixes, report, project skills, review fixes. Experiments: heuristic
+  smoke runs (best ~0.07) and the skip-rule x sequence sweep (best 0.087): all noise.
