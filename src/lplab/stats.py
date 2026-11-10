@@ -1,9 +1,12 @@
 """Statistical fingerprints of rune streams.
 
-The interesting LP anomaly lives here: the unsolved pages have far fewer *doublets*
-(same rune twice in a row) than either random text (1/29) or English plaintext, which says
-something about how the keystream was built (e.g. a key that never repeats a shift of 0 with
-respect to the previous character). See ``doublet_rate`` and ``delta_histogram``.
+The central LP anomaly lives here: the unsolved pages have far fewer *doublets* (the same rune
+twice in a row: 86 of 12,955 pairs, 0.66%) than random text (1/29 = 3.45%). The suppression
+is on the *ciphertext* (c[i] != c[i-1] about 81% more often than chance), not on the key: a key
+that merely never repeats its previous shift still gives ~3.4% doublets. Any plaintext-
+independent additive key (running key, primes, PRNG) has a doublet floor above 1.3% for
+English, so the keystream must react to the text. See ``doublet_rate``, ``delta_histogram``
+and :mod:`lplab.simulate`.
 """
 
 from __future__ import annotations

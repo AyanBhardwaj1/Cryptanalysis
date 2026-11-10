@@ -16,7 +16,7 @@ from dataclasses import dataclass, replace
 from typing import Annotated, Any, Literal
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 from . import ciphers as C
 from . import corpus, kernels, ngram, scoring
@@ -92,12 +92,42 @@ class RunningKeyH(_Base):
     source_kind: Literal["plaintext", "ciphertext"] = "plaintext"
 
 
+class SkipRuleH(_Base):
+    """Keystream + skip-if-same rule (see :mod:`lplab.skiprule`): the doublet-deficit model."""
+
+    family: Literal["skip_rule"] = "skip_rule"
+    key_source: Literal["keyword", "sequence", "running"]
+    keys: list[KeyWord] = Field(default_factory=list, max_length=60)
+    sequence: C.SequenceName | None = None
+    source: PageName | None = None
+    source_kind: Literal["plaintext", "ciphertext"] = "plaintext"
+    offset_max: int = Field(0, ge=0, le=400)
+    affine_mode: Literal["identity", "atbash", "shifts"] = "identity"
+    interrupt_mode: Literal["none", "all"] = "none"
+
+    @model_validator(mode="after")
+    def _needs_key_material(self) -> SkipRuleH:
+        need = {"keyword": self.keys, "sequence": self.sequence, "running": self.source}
+        if not need[self.key_source]:
+            field = {"keyword": "keys", "sequence": "sequence", "running": "source"}
+            raise ValueError(f"key_source={self.key_source} requires {field[self.key_source]}")
+        return self
+
+
 Hypothesis = Annotated[
-    AffineH | VigenereKeyH | VigenereClimbH | SequenceH | AutokeyH | RunningKeyH,
+    AffineH | VigenereKeyH | VigenereClimbH | SequenceH | AutokeyH | RunningKeyH | SkipRuleH,
     Field(discriminator="family"),
 ]
 _ADAPTER: TypeAdapter[Hypothesis] = TypeAdapter(Hypothesis)
-FAMILIES = ("affine", "vigenere_key", "vigenere_climb", "sequence", "autokey", "running_key")
+FAMILIES = (
+    "affine",
+    "vigenere_key",
+    "vigenere_climb",
+    "sequence",
+    "autokey",
+    "running_key",
+    "skip_rule",
+)
 
 
 def parse(data: dict[str, Any] | str) -> Hypothesis:
@@ -259,6 +289,8 @@ def execute(h: Hypothesis, top_k: int = 5) -> list[Candidate]:
     ct = page.runes
     if isinstance(h, VigenereClimbH):
         return _execute_climb(h, page, top_k)
+    if isinstance(h, SkipRuleH):
+        return _execute_skip_rule(h, page, top_k)
 
     raw: list[tuple[str, Decryptor, C.BoolArray]] = []
     for aff in affines(h.affine_mode):
@@ -343,5 +375,53 @@ def _execute_climb(h: VigenereClimbH, page: corpus.Page, top_k: int) -> list[Can
                 f"period={period}; key={indices_to_latin(key)}; {_desc(aff, h.sign)}; {skip_name}"
             )
             out.append(Candidate(page.name, h.family, detail, pt, scoring.score(pt, bounds), t))
+    out.sort(key=lambda c: c.score.combined, reverse=True)
+    return out[:top_k]
+
+
+def _key_materials(h: SkipRuleH, n: int) -> list[tuple[str, IndexArray]]:
+    """(label, keystream of length >= 2n) for each key the hypothesis names."""
+    need = 2 * n + 2
+    if h.key_source == "keyword":
+        return [
+            (f"key={k.upper()}", np.resize(latin_to_indices(k), need))
+            for k in h.keys
+            if latin_to_indices(k).size
+        ]
+    if h.key_source == "sequence":
+        assert h.sequence is not None
+        return [
+            (f"seq={h.sequence}+{off}", C.sequence(h.sequence, need, off))
+            for off in range(h.offset_max + 1)
+        ]
+    assert h.source is not None
+    src_page = (
+        corpus.load_solution(h.source)
+        if h.source_kind == "plaintext" and h.source in corpus.SOLVED
+        else corpus.load(h.source)
+    )
+    src = np.resize(src_page.runes, src_page.runes.size + need)  # wrap around
+    return [
+        (f"running={h.source}/{h.source_kind}@{off}", src[off : off + need])
+        for off in range(min(h.offset_max, src_page.runes.size) + 1)
+    ]
+
+
+def _execute_skip_rule(h: SkipRuleH, page: corpus.Page, top_k: int) -> list[Candidate]:
+    from . import skiprule
+
+    ct = page.runes
+    bounds = page.word_bounds()
+    out: list[Candidate] = []
+    for skip_name, skip in _skip_options(ct, h):
+        for label, key in _key_materials(h, ct.size):
+            for aff in affines(h.affine_mode):
+                pt, n_skips = skiprule.decode(ct, key, sign=h.sign, affine=aff, skip=skip)
+                detail = f"{label}; {_desc(aff, h.sign)}; {skip_name}; key-skips={n_skips}"
+                out.append(
+                    Candidate(
+                        page.name, h.family, detail, pt, scoring.score(pt, bounds), h.transform
+                    )
+                )
     out.sort(key=lambda c: c.score.combined, reverse=True)
     return out[:top_k]

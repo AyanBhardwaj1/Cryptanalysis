@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 
 from . import kernels, ngram
-from .gematria import IndexArray, indices_to_runes
+from .gematria import RUNE_TO_INDEX, IndexArray, indices_to_runes
 
 VOCAB_PATH = ngram.NGRAM_PATH.with_name("vocab.txt.gz")
 
@@ -35,16 +35,21 @@ def quad_score(text: IndexArray) -> float:
     return kernels.quad_score(text, ngram.load().quad)
 
 
+# Every one-rune word in the solved LP plaintext is A or I (27 of 27, ignoring contractions).
+ONE_RUNE_WORDS = frozenset({RUNE_TO_INDEX["ᚪ"], RUNE_TO_INDEX["ᛁ"]})
+
+
 def word_score(text: IndexArray, bounds: list[tuple[int, int]]) -> float:
-    """Length-weighted fraction of words (2+ runes) that are dictionary words."""
+    """Length-weighted fraction of words that are real: dictionary words for 2+ runes, and
+    A or I for one-rune words (a strong, nearly free constraint: random text passes 2/29)."""
     words = vocab()
     hit = total = 0
     for start, end in bounds:
         n = end - start
-        if n < 2:
-            continue
         total += n
-        if indices_to_runes(text[start:end]) in words:
+        if n == 1:
+            hit += int(text[start]) in ONE_RUNE_WORDS
+        elif indices_to_runes(text[start:end]) in words:
             hit += n
     return hit / total if total else 0.0
 

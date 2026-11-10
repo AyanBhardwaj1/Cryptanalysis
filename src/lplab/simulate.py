@@ -89,6 +89,21 @@ def plain_minus_previous_cipher(p: IndexArray, rng: Rng) -> IndexArray:
     return c
 
 
+def skip_if_same(q: float, running: bool = False) -> Mechanism:
+    """Keystream + skip-if-same rule firing with probability q (lplab.skiprule)."""
+    from . import skiprule
+
+    def mech(p: IndexArray, rng: Rng) -> IndexArray:
+        key = (
+            _english(rng, 2 * p.size + 2)
+            if running
+            else np.resize(rng.integers(0, N, 8), 2 * p.size + 2)
+        )
+        return skiprule.encrypt(p, key.astype(np.uint8), q=q, rng=rng)
+
+    return mech
+
+
 MECHANISMS: dict[str, Mechanism] = {
     "vigenere_p8": vigenere(8),
     "vigenere_p29": vigenere(29),
@@ -99,6 +114,9 @@ MECHANISMS: dict[str, Mechanism] = {
     "autokey_ciphertext": autokey_cipher,
     "otp_no_doublets": otp_no_doublets,
     "cipher_feedback_nonzero_key": plain_minus_previous_cipher,
+    "vigenere_p8_skip_if_same_q1": skip_if_same(1.0),
+    "vigenere_p8_skip_if_same_q081": skip_if_same(0.81),
+    "running_key_skip_if_same_q081": skip_if_same(0.81, running=True),
 }
 
 

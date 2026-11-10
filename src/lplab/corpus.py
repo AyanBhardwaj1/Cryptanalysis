@@ -17,7 +17,9 @@ from .gematria import RUNE_TO_INDEX, IndexArray, indices_to_latin, indices_to_ru
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "pages"
 
-WORD_SEPARATORS = frozenset("•⁘⁚⁖⁜ \t\n'\"")
+# Line breaks are layout, not word breaks: the LP wraps words across lines (e.g. KNOW|LEDGE).
+# Every other non-rune character (• ⁘ ⁚ ⁖ ⁜, quotes, digits of the hash) ends a word.
+LAYOUT_ONLY = frozenset("\n\r")
 
 # Section names in reading order; "unsolved" are the 0-57 page blocks not yet decrypted.
 SolvedName = Literal[
@@ -73,13 +75,13 @@ class Page:
         return "".join(chars).replace("•", " ")
 
     def word_lengths(self) -> list[int]:
-        """Rune count of each word, words being split by any separator."""
+        """Rune count of each word; any non-rune except a line break ends a word."""
         lengths: list[int] = []
         run = 0
         for ch in self.raw:
             if ch in RUNE_TO_INDEX:
                 run += 1
-            elif ch in WORD_SEPARATORS and run:
+            elif ch not in LAYOUT_ONLY and run:
                 lengths.append(run)
                 run = 0
         if run:

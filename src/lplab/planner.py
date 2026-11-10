@@ -68,6 +68,23 @@ def curriculum(pages: tuple[str, ...] = corpus.UNSOLVED) -> Iterator[H.Hypothesi
     other_sources = corpus.SOLVED + corpus.UNSOLVED
     for page in pages:
         yield H.AffineH(page=page, rationale="curriculum: all 812 affine maps")
+    for page in pages:  # skip-if-same keystreams: the only screened family matching the doublets
+        for sign in (1, -1):
+            for name in SEQUENCES:
+                yield H.SkipRuleH(
+                    page=page, key_source="sequence", sequence=name, offset_max=20, sign=sign,
+                    rationale="curriculum: number stream + skip-if-same rule",
+                )  # fmt: skip
+            for chunk in [keys[i : i + 30] for i in range(0, len(keys), 30)]:
+                yield H.SkipRuleH(
+                    page=page, key_source="keyword", keys=chunk, sign=sign,
+                    rationale="curriculum: lore keyword + skip-if-same rule",
+                )  # fmt: skip
+            for src in corpus.SOLVED:
+                yield H.SkipRuleH(
+                    page=page, key_source="running", source=src, offset_max=200, sign=sign,
+                    rationale="curriculum: LP-text running key + skip-if-same rule",
+                )  # fmt: skip
     for page in pages:  # ciphertext-feedback / reversed reading (doublet-deficit candidates)
         for t in ("delta", "delta_sum", "reverse"):
             yield H.AffineH(page=page, transform=t, rationale=f"curriculum: {t} view, affine")
@@ -145,11 +162,16 @@ FIRFUMFERENFE; keystream phi(prime_j) = prime_j - 1 (page "An End").
 - Unsolved pages have IoC ~1.0 (flat, like a non-periodic key) and a strong doublet deficit: \
 adjacent equal runes occur ~0.66% vs 3.45% expected. Any proposal should explain that anomaly or \
 test something that could.
-- Mechanism screen (lplab.simulate, LP-English plaintext, random keys): periodic Vigenere, \
-one-time pad, English running key, totient-prime stream and plaintext autokey all give ~3.4% \
-doublets; ciphertext-feedback autokey gives ~1.6%; none reach 0.66%. So the real keystream \
-probably depends on the ciphertext/plaintext or applies a no-repeat rule; plain versions of \
-those families are long shots. The current screen is in mechanism_screen.
+- Doublets are suppressed on the ciphertext, not the key: no plaintext-independent additive \
+key can go below ~1.3% doublets on English. In the lab's mechanism screen only a keystream with \
+a skip-if-same rule (when c would equal the previous rune, burn a key element and re-encrypt) \
+firing with probability ~0.81 fits (family "skip_rule"); a periodic key raises IoC above the \
+observed 1.00, so favour non-periodic keystreams. Screen results are in mechanism_screen.
+- Every one-rune word in solved LP plaintext is A or I; the word score enforces this.
+- Community ledgers (2026) report exhaustive negative sweeps of plain additive families: \
+OEIS sequences, PRNG seeds, ~200 books as running keys, autokey lag <= 8, periods <= 400. Plain \
+(no skip rule) versions of those are low value; combine them with skip_rule or transforms.
+- Unsolved pages: 15.5% two-rune words (English ~23%), suggesting possible filler runes.
 - Word boundaries survive encryption; candidates are scored by quadgram fitness ("quad", \
 English ~ -4.2, random ~ -8.4) and dictionary hit rate over the original word breaks ("words", \
 English > 0.8, random < 0.15). "combined" averages the two on a 0..1 scale.
