@@ -62,17 +62,13 @@ def test_invalid_json_raises_llm_error(llm: L.LLM, fake_client: FakeClient) -> N
         _call(llm)
 
 
-def test_json_array_instead_of_object_raises_llm_error(
-    llm: L.LLM, fake_client: FakeClient
-) -> None:
+def test_json_array_instead_of_object_raises_llm_error(llm: L.LLM, fake_client: FakeClient) -> None:
     fake_client.reply("[1, 2, 3]")
     with pytest.raises(L.LLMError, match="expected object"):
         _call(llm)
 
 
-def test_opus_call_requests_server_fallbacks_and_beta(
-    llm: L.LLM, fake_client: FakeClient
-) -> None:
+def test_opus_call_requests_server_fallbacks_and_beta(llm: L.LLM, fake_client: FakeClient) -> None:
     fake_client.reply("{}")
     _call(llm, OPUS)
     sent = fake_client.calls[-1]
@@ -102,4 +98,3 @@ def test_json_call_requests_structured_output_with_the_schema(
     _call(llm)
     fmt = fake_client.calls[-1]["output_config"]["format"]
     assert fmt == {"type": "json_schema", "schema": SCHEMA}
-

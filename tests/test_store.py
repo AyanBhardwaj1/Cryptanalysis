@@ -115,6 +115,7 @@ def test_candidate_preview_is_stored_as_rendered_text(store: Store) -> None:
     h = H.AffineH(page="p54-55")
     store.add_hypothesis(h, "test")
     store.finish(h, [_cand("p54-55", quad=-5.0, words=0.5)])
-    assert store.top_candidates(1)[0].preview == corpus.load("p54-55").render(
-        corpus.load("p54-55").runes
-    )[:120]
+    assert (
+        store.top_candidates(1)[0].preview
+        == corpus.load("p54-55").render(corpus.load("p54-55").runes)[:120]
+    )

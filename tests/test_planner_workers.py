@@ -166,9 +166,7 @@ def test_judge_ignores_ids_not_in_the_candidate_list(
     assert bogus_id not in judged
 
 
-def test_judge_clamps_scores_into_zero_one(
-    llm: LLM, fake_client: FakeClient, store: Store
-) -> None:
+def test_judge_clamps_scores_into_zero_one(llm: LLM, fake_client: FakeClient, store: Store) -> None:
     ids = _store_two_candidates(store)
     rows = store.top_candidates(10)
     fake_client.reply(

@@ -28,9 +28,7 @@ def test_parse_rejects_unknown_page() -> None:
 
 def test_parse_rejects_period_max_below_period_min() -> None:
     with pytest.raises(ValidationError):
-        H.parse(
-            {"family": "vigenere_climb", "page": "p54-55", "period_min": 10, "period_max": 5}
-        )
+        H.parse({"family": "vigenere_climb", "page": "p54-55", "period_min": 10, "period_max": 5})
 
 
 def test_parse_rejects_keywords_containing_digits() -> None:

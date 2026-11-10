@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Annotated, Any, Literal
 
 import numpy as np
@@ -24,6 +24,7 @@ from .gematria import IndexArray, N, indices_to_latin, latin_to_indices
 
 AffineMode = Literal["identity", "atbash", "shifts", "all"]
 InterruptMode = Literal["none", "all", "greedy"]
+Transform = Literal["none", "delta", "delta_sum", "reverse"]
 PageName = corpus.PageName
 
 KeyWord = Annotated[str, Field(min_length=1, max_length=80, pattern=r"^[A-Za-z ]+$")]
@@ -37,6 +38,7 @@ class _Base(BaseModel):
     affine_mode: AffineMode = "identity"
     interrupter: int | None = Field(0, ge=0, le=N - 1)
     interrupt_mode: InterruptMode = "greedy"
+    transform: Transform = "none"
     rationale: str = Field("", max_length=600)
 
     def fingerprint(self) -> str:
@@ -119,9 +121,10 @@ class Candidate:
     detail: str
     plaintext: IndexArray
     score: scoring.Score
+    transform: Transform = "none"
 
     def preview(self, n: int = 120) -> str:
-        return corpus.load(self.page).render(self.plaintext)[:n]
+        return page_view(self.page, self.transform).render(self.plaintext)[:n]
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -135,6 +138,23 @@ class Candidate:
         }
 
 
+def page_view(name: str, transform: Transform = "none") -> corpus.Page:
+    """The page as a given hypothesis sees it.
+
+    ``delta``: c[i] - c[i-1] (undoes ciphertext-feedback autokey: c[i] = p[i] + k + c[i-1]);
+    ``delta_sum``: c[i] + c[i-1]; ``reverse``: read the section back to front (layout too).
+    """
+    page = corpus.load(name)
+    if transform == "none":
+        return page
+    if transform == "reverse":
+        return corpus.Page.from_text(name, page.raw[::-1])
+    c = page.runes.astype(np.int64)
+    prev = np.concatenate([[0], c[:-1]])
+    new = (c - prev) % N if transform == "delta" else (c + prev) % N
+    return replace(page, runes=new.astype(np.uint8))
+
+
 def affines(mode: AffineMode) -> list[C.Affine]:
     if mode == "identity":
         return [C.IDENTITY]
@@ -146,6 +166,8 @@ def affines(mode: AffineMode) -> list[C.Affine]:
 
 
 Decryptor = Callable[[C.BoolArray], IndexArray]
+
+SKIP_PENALTY = 0.25
 
 
 def _skip_options(ct: IndexArray, h: _Base) -> list[tuple[str, C.BoolArray]]:
@@ -163,6 +185,7 @@ def refine_interrupters(
     window: int = 48,
     max_joint: int = 4,
     max_occurrences: int = 400,
+    skip_penalty: float = SKIP_PENALTY,
 ) -> tuple[C.BoolArray, float]:
     """Decide, left to right, which occurrences of ``rune`` are interrupters.
 
@@ -170,6 +193,10 @@ def refine_interrupters(
     ``window``-rune lookahead (at most ``max_joint`` of them) is scored on that window; only
     the decision for the current occurrence is committed. Deciding clustered interrupters
     jointly avoids the misalignment trap of one-bit-at-a-time greedy search.
+
+    Each skip costs ``skip_penalty`` (mean log10 units over the window). A real interrupter
+    realigns the key and gains ~4 units, while a spurious one on wrong-key text gains ~0.1, so
+    the penalty stops the search from "deleting its way" to better-looking gibberish.
     """
     quad = ngram.load().quad
     hits = np.flatnonzero(ct == rune)[:max_occurrences]
@@ -183,6 +210,7 @@ def refine_interrupters(
             for b, p in enumerate(group):
                 trial[p] = bool(bits >> b & 1)
             s = kernels.quad_score(decrypt(trial)[max(0, pos - 3) : end], quad)
+            s -= skip_penalty * bin(bits).count("1")
             if s > best_score + 1e-9:
                 best_bits, best_score = bits, s
         skip[pos] = bool(best_bits & 1)
@@ -217,7 +245,7 @@ def _finalise(
                 skip = refined
             detail = f"{base}; int={h.interrupter}:greedy={int(skip.sum())}"
         pt = fn(skip)
-        out.append(Candidate(page.name, family, detail, pt, scoring.score(pt, bounds)))
+        out.append(Candidate(page.name, family, detail, pt, scoring.score(pt, bounds), h.transform))
     out.sort(key=lambda c: c.score.combined, reverse=True)
     return out[:top_k]
 
@@ -227,7 +255,7 @@ def _desc(aff: C.Affine, sign: int) -> str:
 
 
 def execute(h: Hypothesis, top_k: int = 5) -> list[Candidate]:
-    page = corpus.load(h.page)
+    page = page_view(h.page, h.transform)
     ct = page.runes
     if isinstance(h, VigenereClimbH):
         return _execute_climb(h, page, top_k)
@@ -298,6 +326,7 @@ def _run(ct: IndexArray, src: IndexArray, off: int, s: int, aff: C.Affine) -> De
 
 
 def _execute_climb(h: VigenereClimbH, page: corpus.Page, top_k: int) -> list[Candidate]:
+    t = h.transform
     ct = page.runes
     quad = ngram.load().quad
     aff = C.ATBASH if h.affine_mode == "atbash" else C.IDENTITY
@@ -313,6 +342,6 @@ def _execute_climb(h: VigenereClimbH, page: corpus.Page, top_k: int) -> list[Can
             detail = (
                 f"period={period}; key={indices_to_latin(key)}; {_desc(aff, h.sign)}; {skip_name}"
             )
-            out.append(Candidate(page.name, h.family, detail, pt, scoring.score(pt, bounds)))
+            out.append(Candidate(page.name, h.family, detail, pt, scoring.score(pt, bounds), t))
     out.sort(key=lambda c: c.score.combined, reverse=True)
     return out[:top_k]

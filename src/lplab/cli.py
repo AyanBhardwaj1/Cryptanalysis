@@ -113,6 +113,18 @@ def _cmd_crib(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_screen(args: argparse.Namespace) -> int:
+    from . import simulate
+
+    obs = simulate.observed()
+    print(f"observed unsolved pages: IoC={obs.ioc:.3f} doublet={obs.doublet_rate:.4f}")
+    print(f"{'mechanism':<30}{'IoC':>7}{'doublet':>10}{'sd':>8}  fits")
+    for r in simulate.screen(trials=args.trials, length=args.length):
+        fits = "yes" if r.matches_observed else "no"
+        print(f"{r.mechanism:<30}{r.ioc:>7.3f}{r.doublet_rate:>10.4f}{r.doublet_sd:>8.4f}  {fits}")
+    return 0
+
+
 def _cmd_build_kernel(args: argparse.Namespace) -> int:
     path = kernels.build(force=True)
     print(f"built {path} (backend: {kernels.backend()})")
@@ -157,6 +169,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--position", type=int, default=0)
     p.add_argument("--sign", type=int, choices=(1, -1), default=1)
     p.set_defaults(fn=_cmd_crib)
+
+    p = sub.add_parser("screen", help="which cipher mechanisms reproduce the page statistics")
+    p.add_argument("--trials", type=int, default=30)
+    p.add_argument("--length", type=int, default=1500)
+    p.set_defaults(fn=_cmd_screen)
 
     p = sub.add_parser("build-kernel", help="(re)compile the C kernel")
     p.set_defaults(fn=_cmd_build_kernel)

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from functools import cache
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -67,6 +68,14 @@ def curriculum(pages: tuple[str, ...] = corpus.UNSOLVED) -> Iterator[H.Hypothesi
     other_sources = corpus.SOLVED + corpus.UNSOLVED
     for page in pages:
         yield H.AffineH(page=page, rationale="curriculum: all 812 affine maps")
+    for page in pages:  # ciphertext-feedback / reversed reading (doublet-deficit candidates)
+        for t in ("delta", "delta_sum", "reverse"):
+            yield H.AffineH(page=page, transform=t, rationale=f"curriculum: {t} view, affine")
+            for sign in (1, -1):
+                yield H.VigenereClimbH(
+                    page=page, transform=t, period_min=1, period_max=30, sign=sign,
+                    rationale=f"curriculum: {t} view, periodic key",
+                )  # fmt: skip
     for page in pages:
         for sign in (1, -1):
             for name in SEQUENCES:
@@ -136,6 +145,11 @@ FIRFUMFERENFE; keystream phi(prime_j) = prime_j - 1 (page "An End").
 - Unsolved pages have IoC ~1.0 (flat, like a non-periodic key) and a strong doublet deficit: \
 adjacent equal runes occur ~0.66% vs 3.45% expected. Any proposal should explain that anomaly or \
 test something that could.
+- Mechanism screen (lplab.simulate, LP-English plaintext, random keys): periodic Vigenere, \
+one-time pad, English running key, totient-prime stream and plaintext autokey all give ~3.4% \
+doublets; ciphertext-feedback autokey gives ~1.6%; none reach 0.66%. So the real keystream \
+probably depends on the ciphertext/plaintext or applies a no-repeat rule; plain versions of \
+those families are long shots. The current screen is in mechanism_screen.
 - Word boundaries survive encryption; candidates are scored by quadgram fitness ("quad", \
 English ~ -4.2, random ~ -8.4) and dictionary hit rate over the original word breaks ("words", \
 English > 0.8, random < 0.15). "combined" averages the two on a 0..1 scale.
@@ -186,6 +200,16 @@ PLAN_SCHEMA: dict[str, Any] = {
 }
 
 
+@cache
+def _screen_summary() -> list[dict[str, Any]]:
+    from . import simulate
+
+    return [
+        {"mechanism": r.mechanism, "doublet": round(r.doublet_rate, 4), "ioc": round(r.ioc, 3)}
+        for r in simulate.screen(trials=10, length=1200)
+    ]
+
+
 def lab_context(store: Store, feedback: list[str], batch: int) -> dict[str, Any]:
     return {
         "batch_size": batch,
@@ -201,6 +225,7 @@ def lab_context(store: Store, feedback: list[str], batch: int) -> dict[str, Any]
             }
             for c in store.top_candidates(10)
         ],
+        "mechanism_screen": _screen_summary(),
         "feedback": feedback[-20:],
         "llm_spend_usd": round(store.total_cost(), 4),
     }  # fmt: skip

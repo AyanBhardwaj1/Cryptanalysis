@@ -55,9 +55,7 @@ def test_nb_climb_recovers_period_seven_key(quad: np.ndarray, koan: np.ndarray) 
     key = rng.integers(0, 29, 7).astype(np.uint8)
     ct = encrypt_stream(koan, np.resize(key, koan.size))
 
-    _score, recovered = _nb_climb(
-        ct, np.zeros(ct.size, dtype=np.bool_), 7, 1, 1, 0, quad, 8, 12, 1
-    )
+    _score, recovered = _nb_climb(ct, np.zeros(ct.size, dtype=np.bool_), 7, 1, 1, 0, quad, 8, 12, 1)
 
     assert np.array_equal(recovered, key)
 
